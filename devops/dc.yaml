@@ -1,0 +1,257 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: lear-db-template
+metadata:
+  name: lear-db-template
+  annotations:
+    openshift.io/display-name: "GCP legal-entities backup"
+    tags: "lear,legal-entities"
+    openshift.io/provider-display-name: "GCP legal-entities backup"
+    openshift.io/documentation-url: "https://github.com/bolyachevets/business-db-sync"
+parameters:
+  - name: "APP_NAME"
+    description: "name of app"
+    value: ${APP_NAME}
+    required: true
+  - name: "ENV"
+    description: "environment"
+    value: ${ENV}
+    required: true
+    required: true
+  - name: "TOOLS_NS"
+    description: "tools namespace hosting image stream"
+    required: true
+objects:
+- kind: DeploymentConfig
+  apiVersion: apps.openshift.io/v1
+  metadata:
+    name: ${APP_NAME}-${ENV}
+    labels:
+      environment: ${ENV}
+      name: ${APP_NAME}
+      role: db
+  spec:
+    strategy:
+      type: Recreate
+      recreateParams:
+        timeoutSeconds: 600
+      resources: {}
+      activeDeadlineSeconds: 21600
+    triggers:
+      - type: ConfigChange
+      - type: ImageChange
+        imageChangeParams:
+          automatic: true
+          containerNames:
+            - cron-server
+          from:
+            kind: ImageStreamTag
+            namespace: ${TOOLS_NS}
+            name: 'postgres15-cron:latest'
+    replicas: 1
+    revisionHistoryLimit: 10
+    test: false
+    selector:
+      environment: ${ENV}
+      name: ${APP_NAME}
+    template:
+      metadata:
+        name: ${APP_NAME}-${ENV}
+        creationTimestamp: null
+        labels:
+          environment: ${ENV}
+          name: ${APP_NAME}
+          role: db
+      spec:
+        volumes:
+          - name: ${APP_NAME}-data
+            persistentVolumeClaim:
+              claimName: ${APP_NAME}-${ENV}
+          - name: gcp-sa-key
+            secret:
+              secretName: gcp-lear-db-sa-secret
+              defaultMode: 420
+          - name: lear-standby-dump
+            persistentVolumeClaim:
+              claimName: lear-standby-dump
+          - name: crontab
+            configMap:
+              name: business-db-crontab
+              defaultMode: 420
+        containers:
+          - resources: {}
+            terminationMessagePath: /${ENV}/termination-log
+            name: cron-server
+            env:
+              - name: READONLY_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: readonly-password
+              - name: PGDATABASE
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: database-name
+              - name: PGUSER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: database-user
+              - name: PGPASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: database-password
+              - name: REPLICA_ADMIN
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: replica-admin
+            securityContext:
+              runAsNonRoot: true
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - name: lear-standby-dump
+                mountPath: /data
+              - name: crontab
+                mountPath: /opt/app-root2/crontab
+                subPath: crontab
+            terminationMessagePolicy: File
+            image: >-
+              image-registry.openshift-image-registry.svc:5000/${TOOLS_NS}/postgres15-cron:latest
+          - resources: {}
+            terminationMessagePath: /${ENV}/termination-log
+            name: cloud-sql-proxy
+            securityContext:
+              runAsNonRoot: true
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - name: ${APP_NAME}-data
+                mountPath: /var/lib/pgsql/data
+              - name: gcp-sa-key
+                mountPath: /gcp
+            terminationMessagePolicy: File
+            image: 'gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.1.0'
+            args:
+              - '--credentials-file=/gcp/service_account.json'
+              - '--structured-logs'
+              - 'a083gt-${ENV}:northamerica-northeast1:businesses-db-${ENV}?port=6003'
+          - resources:
+              limits:
+                cpu: '1'
+                memory: 2Gi
+              requests:
+                cpu: 100m
+                memory: 512Mi
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-i'
+                  - '-c'
+                  - >-
+                    psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d
+                    $POSTGRESQL_DATABASE -c 'SELECT 1'
+              initialDelaySeconds: 5
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            terminationMessagePath: /${ENV}/termination-log
+            name: ${APP_NAME}-${ENV}
+            livenessProbe:
+              tcpSocket:
+                port: 5432
+              initialDelaySeconds: 30
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            env:
+              - name: POSTGRESQL_DATABASE
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: database-name
+              - name: POSTGRESQL_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: database-user
+              - name: POSTGRESQL_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgresql-gcp-lear-secret
+                    key: database-password
+            securityContext:
+              capabilities: {}
+              privileged: false
+            ports:
+              - containerPort: 5432
+                protocol: TCP
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - name: ${APP_NAME}-data
+                mountPath: /var/lib/psql/data
+              - name: lear-standby-dump
+                mountPath: /data
+            terminationMessagePolicy: File
+            image: >-
+              registry.redhat.io/rhel9/postgresql-15:latest
+        restartPolicy: Always
+        terminationGracePeriodSeconds: 30
+        dnsPolicy: ClusterFirst
+        securityContext: {}
+        schedulerName: default-scheduler
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: ${APP_NAME}-${ENV}
+  spec:
+    ports:
+      - name: ${APP_NAME}-${ENV}
+        protocol: TCP
+        port: 5432
+        targetPort: 5432
+    internalTrafficPolicy: Cluster
+    selector:
+      environment: ${ENV}
+      name: ${APP_NAME}
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: lear-standby-dump
+  spec:
+    accessModes:
+      - ReadWriteMany
+    resources:
+      requests:
+        storage: 500Mi
+    storageClassName: netapp-file-standard
+    volumeMode: Filesystem
+  status:
+    phase: Bound
+    accessModes:
+      - ReadWriteMany
+    capacity:
+      storage: 500Mi
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: ${APP_NAME}-${ENV}
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 5Gi
+    storageClassName: netapp-file-standard
+    volumeMode: Filesystem
+  status:
+    phase: Bound
+    accessModes:
+      - ReadWriteOnce
+    capacity:
+      storage: 5Gi

@@ -1,0 +1,8 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: business-db-crontab
+data:
+  crontab: |-
+    #          user    command
+    0 1 * * *  default /opt/app-root2/run.sh

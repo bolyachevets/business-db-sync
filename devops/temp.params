@@ -1,0 +1,3 @@
+APP_NAME=gcp-lear-db-backup
+ENV=dev
+TOOLS_NS=73c567-tools
