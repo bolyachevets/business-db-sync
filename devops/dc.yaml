@@ -127,8 +127,6 @@ objects:
               runAsNonRoot: true
             imagePullPolicy: IfNotPresent
             volumeMounts:
-              - name: ${APP_NAME}-data
-                mountPath: /var/lib/pgsql/data
               - name: gcp-sa-key
                 mountPath: /gcp
             terminationMessagePolicy: File
@@ -193,7 +191,7 @@ objects:
             imagePullPolicy: IfNotPresent
             volumeMounts:
               - name: ${APP_NAME}-data
-                mountPath: /var/lib/psql/data
+                mountPath: /var/lib/pgsql/data
               - name: ${APP_NAME}-standby-dump
                 mountPath: /data
             terminationMessagePolicy: File
