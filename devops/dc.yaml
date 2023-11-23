@@ -108,6 +108,11 @@ objects:
                   secretKeyRef:
                     name: ${APP_NAME}-secret
                     key: database-password
+              - name: REPLICA_ADMIN
+                valueFrom:
+                  secretKeyRef:
+                    name: ${APP_NAME}-secret
+                    key: replica-admin
             securityContext:
               runAsNonRoot: true
             imagePullPolicy: IfNotPresent
