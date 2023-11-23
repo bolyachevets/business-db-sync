@@ -1,3 +1,5 @@
 APP_NAME=gcp-lear-db-backup
 ENV=dev
 TOOLS_NS=73c567-tools
+AUTH_PROXY_CONNECT=a083gt-dev:northamerica-northeast1:businesses-db-dev?port=6003
+GCP_SA_SECRET=gcp-lear-db-sa-secret

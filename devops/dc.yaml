@@ -1,26 +1,30 @@
 apiVersion: template.openshift.io/v1
 kind: Template
 labels:
-  template: lear-db-template
+  template: standby-db-template
 metadata:
-  name: lear-db-template
+  name: standby-db-template
   annotations:
-    openshift.io/display-name: "GCP legal-entities backup"
-    tags: "lear,legal-entities"
-    openshift.io/provider-display-name: "GCP legal-entities backup"
+    openshift.io/display-name: "GCP db backup"
+    tags: "standby, db"
+    openshift.io/provider-display-name: "GCP db backup"
     openshift.io/documentation-url: "https://github.com/bolyachevets/business-db-sync"
 parameters:
   - name: "APP_NAME"
     description: "name of app"
-    value: ${APP_NAME}
     required: true
   - name: "ENV"
     description: "environment"
-    value: ${ENV}
     required: true
     required: true
   - name: "TOOLS_NS"
     description: "tools namespace hosting image stream"
+    required: true
+  - name: "AUTH_PROXY_CONNECT"
+    description: "gcp cloud sql connection string"
+    required: true
+  - name: "GCP_SA_SECRET"
+    description: "gcp service account key secret"
     required: true
 objects:
 - kind: DeploymentConfig
@@ -70,11 +74,11 @@ objects:
               claimName: ${APP_NAME}-${ENV}
           - name: gcp-sa-key
             secret:
-              secretName: gcp-lear-db-sa-secret
+              secretName: ${GCP_SA_SECRET}
               defaultMode: 420
-          - name: lear-standby-dump
+          - name: ${APP_NAME}-standby-dump
             persistentVolumeClaim:
-              claimName: lear-standby-dump
+              claimName: ${APP_NAME}-standby-dump
           - name: crontab
             configMap:
               name: business-db-crontab
@@ -87,33 +91,33 @@ objects:
               - name: READONLY_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: readonly-password
               - name: PGDATABASE
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: database-name
               - name: PGUSER
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: database-user
               - name: PGPASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: database-password
               - name: REPLICA_ADMIN
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: replica-admin
             securityContext:
               runAsNonRoot: true
             imagePullPolicy: IfNotPresent
             volumeMounts:
-              - name: lear-standby-dump
+              - name: ${APP_NAME}-standby-dump
                 mountPath: /data
               - name: crontab
                 mountPath: /opt/app-root2/crontab
@@ -137,7 +141,7 @@ objects:
             args:
               - '--credentials-file=/gcp/service_account.json'
               - '--structured-logs'
-              - 'a083gt-${ENV}:northamerica-northeast1:businesses-db-${ENV}?port=6003'
+              - '${AUTH_PROXY_CONNECT}'
           - resources:
               limits:
                 cpu: '1'
@@ -173,17 +177,17 @@ objects:
               - name: POSTGRESQL_DATABASE
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: database-name
               - name: POSTGRESQL_USER
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: database-user
               - name: POSTGRESQL_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: postgresql-gcp-lear-secret
+                    name: ${APP_NAME}-secret
                     key: database-password
             securityContext:
               capabilities: {}
@@ -195,7 +199,7 @@ objects:
             volumeMounts:
               - name: ${APP_NAME}-data
                 mountPath: /var/lib/psql/data
-              - name: lear-standby-dump
+              - name: ${APP_NAME}-standby-dump
                 mountPath: /data
             terminationMessagePolicy: File
             image: >-
@@ -222,7 +226,7 @@ objects:
 - kind: PersistentVolumeClaim
   apiVersion: v1
   metadata:
-    name: lear-standby-dump
+    name: ${APP_NAME}-standby-dump
   spec:
     accessModes:
       - ReadWriteMany
