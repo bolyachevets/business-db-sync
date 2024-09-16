@@ -1,0 +1,5 @@
+APP_NAME=gcp-auth-db-backup
+ENV=dev
+TOOLS_NS=d2b3d8-tools
+AUTH_PROXY_CONNECT=gtksf3-dev:northamerica-northeast1:auth-db-dev?port=6003
+GCP_SA_SECRET=gcp-auth-db-sa-secret

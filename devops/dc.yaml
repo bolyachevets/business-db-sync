@@ -27,8 +27,8 @@ parameters:
     description: "gcp service account key secret"
     required: true
 objects:
-- kind: DeploymentConfig
-  apiVersion: apps.openshift.io/v1
+- apiVersion: apps/v1
+  kind: Deployment
   metadata:
     name: ${APP_NAME}-${ENV}
     labels:
@@ -36,33 +36,16 @@ objects:
       name: ${APP_NAME}
       role: db
   spec:
-    strategy:
-      type: Recreate
-      recreateParams:
-        timeoutSeconds: 600
-      resources: {}
-      activeDeadlineSeconds: 21600
-    triggers:
-      - type: ConfigChange
-      - type: ImageChange
-        imageChangeParams:
-          automatic: true
-          containerNames:
-            - cron-server
-          from:
-            kind: ImageStreamTag
-            namespace: ${TOOLS_NS}
-            name: 'postgres15-cron:latest'
     replicas: 1
     revisionHistoryLimit: 10
-    test: false
     selector:
-      environment: ${ENV}
-      name: ${APP_NAME}
+      matchLabels:
+        environment: ${ENV}
+        name: ${APP_NAME}
+    strategy:
+      type: Recreate
     template:
       metadata:
-        name: ${APP_NAME}-${ENV}
-        creationTimestamp: null
         labels:
           environment: ${ENV}
           name: ${APP_NAME}
@@ -84,9 +67,17 @@ objects:
               name: ${APP_NAME}-crontab
               defaultMode: 420
         containers:
-          - resources: {}
-            terminationMessagePath: /${ENV}/termination-log
-            name: cron-server
+          - name: cron-server
+            image: >-
+              image-registry.openshift-image-registry.svc:5000/${TOOLS_NS}/postgres15-cron:latest
+            imagePullPolicy: IfNotPresent
+            resources: {}
+            volumeMounts:
+              - name: ${APP_NAME}-standby-dump
+                mountPath: /data
+              - name: crontab
+                mountPath: /opt/app-root2/crontab
+                subPath: crontab
             env:
               - name: READONLY_PASSWORD
                 valueFrom:
@@ -115,62 +106,29 @@ objects:
                     key: replica-admin
             securityContext:
               runAsNonRoot: true
-            imagePullPolicy: IfNotPresent
-            volumeMounts:
-              - name: ${APP_NAME}-standby-dump
-                mountPath: /data
-              - name: crontab
-                mountPath: /opt/app-root2/crontab
-                subPath: crontab
-            terminationMessagePolicy: File
-            image: >-
-              image-registry.openshift-image-registry.svc:5000/${TOOLS_NS}/postgres15-cron:latest
-          - resources: {}
             terminationMessagePath: /${ENV}/termination-log
-            name: cloud-sql-proxy
-            securityContext:
-              runAsNonRoot: true
+            terminationMessagePolicy: File
+          - name: cloud-sql-proxy
+            image: 'gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.1.0'
             imagePullPolicy: IfNotPresent
             volumeMounts:
               - name: gcp-sa-key
                 mountPath: /gcp
-            terminationMessagePolicy: File
-            image: 'gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.1.0'
             args:
               - '--credentials-file=/gcp/service_account.json'
               - '--structured-logs'
               - '${AUTH_PROXY_CONNECT}'
-          - resources:
-              limits:
-                cpu: '1'
-                memory: 2Gi
-              requests:
-                cpu: 100m
-                memory: 512Mi
-            readinessProbe:
-              exec:
-                command:
-                  - /bin/sh
-                  - '-i'
-                  - '-c'
-                  - >-
-                    psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d
-                    $POSTGRESQL_DATABASE -c 'SELECT 1'
-              initialDelaySeconds: 5
-              timeoutSeconds: 1
-              periodSeconds: 10
-              successThreshold: 1
-              failureThreshold: 3
+            securityContext:
+              runAsNonRoot: true
             terminationMessagePath: /${ENV}/termination-log
-            name: ${APP_NAME}-${ENV}
-            livenessProbe:
-              tcpSocket:
-                port: 5432
-              initialDelaySeconds: 30
-              timeoutSeconds: 1
-              periodSeconds: 10
-              successThreshold: 1
-              failureThreshold: 3
+            terminationMessagePolicy: File
+          - name: ${APP_NAME}-${ENV}
+            image: >-
+              registry.redhat.io/rhel9/postgresql-15:latest
+            imagePullPolicy: IfNotPresent
+            ports:
+              - containerPort: 5432
+                protocol: TCP
             env:
               - name: POSTGRESQL_DATABASE
                 valueFrom:
@@ -187,21 +145,44 @@ objects:
                   secretKeyRef:
                     name: ${APP_NAME}-secret
                     key: database-password
-            securityContext:
-              capabilities: {}
-              privileged: false
-            ports:
-              - containerPort: 5432
-                protocol: TCP
-            imagePullPolicy: IfNotPresent
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-i'
+                  - '-c'
+                  - >-
+                    psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c 'SELECT 1'
+              initialDelaySeconds: 5
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            livenessProbe:
+              tcpSocket:
+                port: 5432
+              initialDelaySeconds: 30
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            resources:
+              limits:
+                cpu: '1'
+                memory: 2Gi
+              requests:
+                cpu: 100m
+                memory: 512Mi
             volumeMounts:
               - name: ${APP_NAME}-data
                 mountPath: /var/lib/pgsql/data
               - name: ${APP_NAME}-standby-dump
                 mountPath: /data
+            securityContext:
+              capabilities: {}
+              privileged: false
+            terminationMessagePath: /${ENV}/termination-log
             terminationMessagePolicy: File
-            image: >-
-              registry.redhat.io/rhel9/postgresql-15:latest
         restartPolicy: Always
         terminationGracePeriodSeconds: 30
         dnsPolicy: ClusterFirst
