@@ -13,14 +13,14 @@ BEGIN
 END
 \$\$;'
   FROM pg_roles
-  WHERE rolname NOT IN ('postgres', 'cloudsqladmin', 'cloudsqlsuperuser')
+  WHERE rolname NOT IN ('postgres')
     AND rolname NOT LIKE 'pg\\_%' ESCAPE '\\'
     AND rolname NOT LIKE 'iam\\_%' ESCAPE '\\'
     AND rolname NOT LIKE 'rds%'
     AND rolname NOT LIKE 'cloudsql%'
 " | grep -v "^DO \$\$" > /data/roles.sql
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity WHERE pg_stat_activity.datname = '$PGDATABASE' AND pid <> pg_backend_pid();"
-dropdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
+psql -U $REPLICA_ADMIN -h localhost -p 5432 -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$PGDATABASE'" | grep -q 1 && dropdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
 createdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -f /data/roles.sql
 psql -U $REPLICA_ADMIN -h localhost -p 5432  -d $PGDATABASE -v ON_ERROR_STOP=0 -x < /data/backup.sql
