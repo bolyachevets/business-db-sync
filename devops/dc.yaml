@@ -246,3 +246,30 @@ objects:
     crontab: |-
       #          user    command
       0 1 * * *  default /opt/app-root2/run.sh
+- kind: TransportServerClaim
+  apiVersion: porter.devops.gov.bc.ca/v1alpha1
+  metadata:
+    name: ${APP_NAME}-${ENV}-tsc
+  spec:
+    monitor:
+      interval: 10
+      timeout: 10
+      type: tcp
+    overrideServicePort: true
+    service: ${APP_NAME}-${ENV}
+    servicePort: 5432
+- kind: NetworkPolicy
+  apiVersion: networking.k8s.io/v1
+  metadata:
+    name: allow-from-f5-ingress
+  spec:
+    podSelector:
+      matchLabels:
+        name: ${APP_NAME}
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                network.openshift.io/policy-group: ingress
+    policyTypes:
+      - Ingress
