@@ -1,4 +1,4 @@
-FROM registry.redhat.io/rhel9/postgresql-15
+FROM registry.redhat.io/rhel9/postgresql-15:latest
 USER root
 RUN mkdir /opt/app-root2 && chmod 755 /opt/app-root2
 WORKDIR /opt/app-root2
