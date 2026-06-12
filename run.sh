@@ -1,6 +1,10 @@
 #!/bin/bash
-pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n public --format=p  --file=/data/backup.sql
-psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
+# Use PGSCHEMA if set, otherwise default to 'public'
+SCHEMA=${PGSCHEMA:-public}
+
+pg_dump -U $PGUSER -h localhost -p 5432 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
+
+psql -U $PGUSER -h localhost -p 5432 -d postgres --tuples-only --no-align -c "
   SELECT 'DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''' || rolname || ''') THEN
@@ -19,17 +23,19 @@ END
     AND rolname NOT LIKE 'rds%'
     AND rolname NOT LIKE 'cloudsql%'
 " | grep -v "^DO \$\$" > /data/roles.sql
+
 while
   psql -U $REPLICA_ADMIN -h localhost -p 5432 -d postgres -tAc "SELECT 1 FROM pg_stat_activity WHERE datname = '$PGDATABASE' AND pid <> pg_backend_pid()" | grep -q 1
 do
   psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$PGDATABASE' AND pid <> pg_backend_pid();"
   sleep 1
 done
+
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$PGDATABASE'" | grep -q 1 && dropdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
 createdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -f /data/roles.sql
-psql -U $REPLICA_ADMIN -h localhost -p 5432  -d $PGDATABASE -v ON_ERROR_STOP=0 -x < /data/backup.sql
+psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -v ON_ERROR_STOP=0 -x < /data/backup.sql
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "ALTER USER readonly WITH LOGIN PASSWORD '${READONLY_PASSWORD}';"
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT USAGE ON SCHEMA public TO readonly;"
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly;"
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO readonly;"
+psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT USAGE ON SCHEMA $SCHEMA TO readonly;"
+psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT SELECT ON ALL TABLES IN SCHEMA $SCHEMA TO readonly;"
+psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "ALTER DEFAULT PRIVILEGES IN SCHEMA $SCHEMA GRANT SELECT ON TABLES TO readonly;"

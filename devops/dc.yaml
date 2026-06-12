@@ -23,8 +23,14 @@ parameters:
   - name: "AUTH_PROXY_CONNECT"
     description: "gcp cloud sql connection string"
     required: true
-  - name: "GCP_SA_SECRET"
-    description: "gcp service account key secret"
+  - name: "GCP_WIF_CONFIG_SECRET"
+    description: "gcp wif configuration file secret"
+    required: true
+  - name: "WIF_CREDENTIALS_SECRET"
+    description: "keycloak client credentials secret for WIF"
+    required: true
+  - name: "KEYCLOAK_TOKEN_URL"
+    description: "keycloak token endpoint URL"
     required: true
 objects:
 - apiVersion: apps/v1
@@ -44,6 +50,17 @@ objects:
         name: ${APP_NAME}
     strategy:
       type: Recreate
+    triggers:
+      - type: ConfigChange
+      - type: ImageChange
+        imageChangeParams:
+          automatic: true
+          containerNames:
+            - cron-server
+          from:
+            kind: ImageStreamTag
+            namespace: ${TOOLS_NS}
+            name: postgres15-cron:${ENV}
     template:
       metadata:
         labels:
@@ -55,10 +72,6 @@ objects:
           - name: ${APP_NAME}-data
             persistentVolumeClaim:
               claimName: ${APP_NAME}-${ENV}
-          - name: gcp-sa-key
-            secret:
-              secretName: ${GCP_SA_SECRET}
-              defaultMode: 420
           - name: ${APP_NAME}-standby-dump
             persistentVolumeClaim:
               claimName: ${APP_NAME}-standby-dump
@@ -66,10 +79,82 @@ objects:
             configMap:
               name: ${APP_NAME}-crontab
               defaultMode: 420
+          - name: gcp-sa-key
+            secret:
+              secretName: ${GCP_WIF_CONFIG_SECRET}
+              defaultMode: 420
+          - name: gcp-wif-token
+            emptyDir: {}
+        initContainers:
+          - name: wif-auth-init
+            image: 'curlimages/curl:latest'
+            imagePullPolicy: Always
+            command:
+              - /bin/sh
+              - '-c'
+              - |
+                TOKEN=$(curl -s -X POST "${KEYCLOAK_TOKEN_URL}" \
+                  -H "Content-Type: application/x-www-form-urlencoded" \
+                  -d "grant_type=client_credentials&client_id=$KEYCLOAK_CLIENT_ID&client_secret=$KEYCLOAK_CLIENT_SECRET" \
+                  | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+                mkdir -p /var/run/secrets/google && echo $TOKEN > /var/run/secrets/google/token
+            env:
+              - name: KEYCLOAK_TOKEN_URL
+                value: ${KEYCLOAK_TOKEN_URL}
+              - name: KEYCLOAK_CLIENT_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: ${WIF_CREDENTIALS_SECRET}
+                    key: clientId
+              - name: KEYCLOAK_CLIENT_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: ${WIF_CREDENTIALS_SECRET}
+                    key: clientSecret
+            volumeMounts:
+              - name: gcp-wif-token
+                mountPath: /var/run/secrets/google
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
         containers:
+          - name: wif-token-refresher
+            image: 'curlimages/curl:latest'
+            imagePullPolicy: Always
+            command:
+              - /bin/sh
+              - '-c'
+              - |
+                while true; do
+                  sleep 2700
+                  TOKEN=$(curl -s -X POST "${KEYCLOAK_TOKEN_URL}" \
+                    -H "Content-Type: application/x-www-form-urlencoded" \
+                    -d "grant_type=client_credentials&client_id=$KEYCLOAK_CLIENT_ID&client_secret=$KEYCLOAK_CLIENT_SECRET" \
+                    | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+                  echo $TOKEN > /var/run/secrets/google/token
+                done
+            env:
+              - name: KEYCLOAK_TOKEN_URL
+                value: ${KEYCLOAK_TOKEN_URL}
+              - name: KEYCLOAK_CLIENT_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: ${WIF_CREDENTIALS_SECRET}
+                    key: clientId
+              - name: KEYCLOAK_CLIENT_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: ${WIF_CREDENTIALS_SECRET}
+                    key: clientSecret
+            volumeMounts:
+              - name: gcp-wif-token
+                mountPath: /var/run/secrets/google
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
           - name: cron-server
             image: >-
-              image-registry.openshift-image-registry.svc:5000/${TOOLS_NS}/postgres15-cron:latest
+              image-registry.openshift-image-registry.svc:5000/${TOOLS_NS}/postgres15-cron:${ENV}
             imagePullPolicy: IfNotPresent
             resources: {}
             volumeMounts:
@@ -93,12 +178,7 @@ objects:
                 valueFrom:
                   secretKeyRef:
                     name: ${APP_NAME}-secret
-                    key: database-user
-              - name: PGPASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: ${APP_NAME}-secret
-                    key: database-password
+                    key: database-user-iam
               - name: REPLICA_ADMIN
                 valueFrom:
                   secretKeyRef:
@@ -114,8 +194,12 @@ objects:
             volumeMounts:
               - name: gcp-sa-key
                 mountPath: /gcp
+              - name: gcp-wif-token
+                mountPath: /var/run/secrets/google
+                readOnly: true
             args:
-              - '--credentials-file=/gcp/service_account.json'
+              - '--credentials-file=/gcp/wif-config.json'
+              - '--auto-iam-authn'
               - '--structured-logs'
               - '${AUTH_PROXY_CONNECT}'
             securityContext:
