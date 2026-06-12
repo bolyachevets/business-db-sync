@@ -184,6 +184,11 @@ objects:
                   secretKeyRef:
                     name: ${APP_NAME}-secret
                     key: replica-admin
+              - name: DATABASE_SCHEMA
+                valueFrom:
+                  secretKeyRef:
+                    name: ${APP_NAME}-secret
+                    key: database-schema
             securityContext:
               runAsNonRoot: true
             terminationMessagePath: /${ENV}/termination-log
@@ -229,24 +234,27 @@ objects:
                   secretKeyRef:
                     name: ${APP_NAME}-secret
                     key: database-password
+            livenessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-c'
+                  - >-
+                    PGPASSWORD=$POSTGRESQL_PASSWORD psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c 'SELECT 1'
+              initialDelaySeconds: 30
+              timeoutSeconds: 5
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
             readinessProbe:
               exec:
                 command:
                   - /bin/sh
-                  - '-i'
                   - '-c'
                   - >-
-                    psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c 'SELECT 1'
+                    PGPASSWORD=$POSTGRESQL_PASSWORD psql -h 127.0.0.1 -U $POSTGRESQL_USER -q -d $POSTGRESQL_DATABASE -c 'SELECT 1'
               initialDelaySeconds: 5
-              timeoutSeconds: 1
-              periodSeconds: 10
-              successThreshold: 1
-              failureThreshold: 3
-            livenessProbe:
-              tcpSocket:
-                port: 5432
-              initialDelaySeconds: 30
-              timeoutSeconds: 1
+              timeoutSeconds: 5
               periodSeconds: 10
               successThreshold: 1
               failureThreshold: 3
