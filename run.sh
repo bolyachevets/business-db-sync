@@ -2,11 +2,14 @@
 # Use DATABASE_SCHEMA if set, otherwise default to 'public'
 SCHEMA=${DATABASE_SCHEMA:-public}
 
+# Unset PGPASSWORD for IAM auth - Cloud SQL Proxy handles authentication
+unset PGPASSWORD
+
 # Dump from Cloud SQL on port 6003
-pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
+pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --no-password --format=p --file=/data/backup.sql
 
 # Get roles from Cloud SQL on port 6003
-psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
+psql -U $PGUSER -h localhost -p 6003 -d postgres --no-password --tuples-only --no-align -c "
   SELECT 'DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''' || rolname || ''') THEN
