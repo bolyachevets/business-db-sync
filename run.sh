@@ -1,6 +1,6 @@
 #!/bin/bash
 # Use PGSCHEMA if set, otherwise default to 'public'
-SCHEMA=${PGSCHEMA:-public}
+SCHEMA=${DATABASE_SCHEMA:-public}
 
 pg_dump -U $PGUSER -h localhost -p 5432 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
 
