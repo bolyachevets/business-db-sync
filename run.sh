@@ -1,10 +1,37 @@
 #!/bin/bash
 SCHEMA=${DATABASE_SCHEMA:-public}
-TOKEN=$(cat /var/run/secrets/google/token)
 
-PGPASSWORD=$TOKEN pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
+# Read the Keycloak token
+KEYCLOAK_TOKEN=$(cat /var/run/secrets/google/token)
 
-PGPASSWORD=$TOKEN psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
+# Exchange Keycloak token for Google access token
+# Using the STS endpoint for Workload Identity Federation
+GOOGLE_TOKEN=$(curl -s -X POST "https://sts.googleapis.com/v1/token" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"audience\": \"//iam.googleapis.com/projects/331250273634/locations/global/workloadIdentityPools/central-keycloak-pool/providers/central-keycloak-provider\",
+    \"grantType\": \"access_token\",
+    \"requestedTokenType\": \"urn:ietf:params:oauth:token-type:access_token\",
+    \"subjectToken\": \"$KEYCLOAK_TOKEN\",
+    \"subjectTokenType\": \"urn:ietf:params:oauth:token-type:id_token\"
+  }" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
+
+# Check if token exchange succeeded
+if [ -z "$GOOGLE_TOKEN" ]; then
+  echo "ERROR: Failed to exchange token for Google access token"
+  exit 1
+fi
+
+# Dump from Cloud SQL using Google token as password
+PGPASSWORD=$GOOGLE_TOKEN pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
+
+if [ $? -ne 0 ]; then
+  echo "ERROR: pg_dump failed"
+  exit 1
+fi
+
+# Get roles from Cloud SQL
+PGPASSWORD=$GOOGLE_TOKEN psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
   SELECT 'DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''' || rolname || ''') THEN
@@ -24,7 +51,7 @@ END
     AND rolname NOT LIKE 'cloudsql%'
 " | grep -v "^DO \$\$" > /data/roles.sql
 
-# Rest of your script (local PostgreSQL part) stays exactly the same
+# Local PostgreSQL operations (using password auth for local DB)
 while
   psql -U $REPLICA_ADMIN -h localhost -p 5432 -d postgres -tAc "SELECT 1 FROM pg_stat_activity WHERE datname = '$PGDATABASE' AND pid <> pg_backend_pid()" | grep -q 1
 do
@@ -40,3 +67,5 @@ psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "ALTER USER readonly WITH LOGIN P
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT USAGE ON SCHEMA $SCHEMA TO readonly;"
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT SELECT ON ALL TABLES IN SCHEMA $SCHEMA TO readonly;"
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "ALTER DEFAULT PRIVILEGES IN SCHEMA $SCHEMA GRANT SELECT ON TABLES TO readonly;"
+
+echo "Backup completed successfully"
