@@ -163,6 +163,9 @@ objects:
               - name: crontab
                 mountPath: /opt/app-root2/crontab
                 subPath: crontab
+              - name: gcp-wif-token
+                mountPath: /var/run/secrets/google
+                readOnly: true
             env:
               - name: READONLY_PASSWORD
                 valueFrom:
@@ -204,8 +207,8 @@ objects:
                 readOnly: true
             args:
               - '--credentials-file=/gcp/wif-config.json'
-              - '--auto-iam-authn'
               - '--structured-logs'
+              - '--auto-iam-authn'
               - '${AUTH_PROXY_CONNECT}'
             securityContext:
               runAsNonRoot: true
