@@ -1,29 +1,11 @@
 #!/bin/bash
 SCHEMA=${DATABASE_SCHEMA:-public}
 
-# Read the Keycloak token
-KEYCLOAK_TOKEN=$(cat /var/run/secrets/google/token)
+# Empty password for IAM authentication (cloud-sql-proxy handles auth)
+export PGPASSWORD=""
 
-# Exchange Keycloak token for Google access token
-# Using the STS endpoint for Workload Identity Federation
-GOOGLE_TOKEN=$(curl -s -X POST "https://sts.googleapis.com/v1/token" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"audience\": \"//iam.googleapis.com/projects/331250273634/locations/global/workloadIdentityPools/central-keycloak-pool/providers/central-keycloak-provider\",
-    \"grantType\": \"access_token\",
-    \"requestedTokenType\": \"urn:ietf:params:oauth:token-type:access_token\",
-    \"subjectToken\": \"$KEYCLOAK_TOKEN\",
-    \"subjectTokenType\": \"urn:ietf:params:oauth:token-type:id_token\"
-  }" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
-
-# Check if token exchange succeeded
-if [ -z "$GOOGLE_TOKEN" ]; then
-  echo "ERROR: Failed to exchange token for Google access token"
-  exit 1
-fi
-
-# Dump from Cloud SQL using Google token as password
-PGPASSWORD=$GOOGLE_TOKEN pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
+# Dump from Cloud SQL (proxy handles WIF authentication)
+pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
 
 if [ $? -ne 0 ]; then
   echo "ERROR: pg_dump failed"
@@ -31,7 +13,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Get roles from Cloud SQL
-PGPASSWORD=$GOOGLE_TOKEN psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
+psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
   SELECT 'DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''' || rolname || ''') THEN
