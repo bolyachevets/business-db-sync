@@ -1,15 +1,10 @@
 #!/bin/bash
-# Use DATABASE_SCHEMA if set, otherwise default to 'public'
 SCHEMA=${DATABASE_SCHEMA:-public}
+TOKEN=$(cat /var/run/secrets/google/token)
 
-# Unset PGPASSWORD for IAM auth - Cloud SQL Proxy handles authentication
-unset PGPASSWORD
+PGPASSWORD=$TOKEN pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
 
-# Dump from Cloud SQL on port 6003
-pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --no-password --format=p --file=/data/backup.sql
-
-# Get roles from Cloud SQL on port 6003
-psql -U $PGUSER -h localhost -p 6003 -d postgres --no-password --tuples-only --no-align -c "
+PGPASSWORD=$TOKEN psql -U $PGUSER -h localhost -p 6003 -d postgres --tuples-only --no-align -c "
   SELECT 'DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''' || rolname || ''') THEN
@@ -29,7 +24,7 @@ END
     AND rolname NOT LIKE 'cloudsql%'
 " | grep -v "^DO \$\$" > /data/roles.sql
 
-# Local PostgreSQL operations on port 5432
+# Rest of your script (local PostgreSQL part) stays exactly the same
 while
   psql -U $REPLICA_ADMIN -h localhost -p 5432 -d postgres -tAc "SELECT 1 FROM pg_stat_activity WHERE datname = '$PGDATABASE' AND pid <> pg_backend_pid()" | grep -q 1
 do
