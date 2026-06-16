@@ -14,6 +14,14 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Extract extensions from source
+psql -U $PGUSER -h localhost -p 6003 -d $PGDATABASE --tuples-only --no-align -c "
+  SELECT 'CREATE EXTENSION IF NOT EXISTS \"' || e.extname || '\" SCHEMA ' || n.nspname || ';'
+  FROM pg_extension e
+  JOIN pg_namespace n ON e.extnamespace = n.oid
+  WHERE n.nspname = '$SCHEMA'
+" > /data/extensions.sql
+
 # Remove backslash commands
 sed -i '/^\\/d' /data/backup.sql
 
@@ -29,11 +37,11 @@ done
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = '$PGDATABASE'" | grep -q 1 && dropdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
 createdb -U $REPLICA_ADMIN -h localhost -p 5432 $PGDATABASE
 
-# Enable uuid extension
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
-
 # Create schema
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "CREATE SCHEMA IF NOT EXISTS $SCHEMA;"
+
+# Create extensions (if any)
+[ -s /data/extensions.sql ] && psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -f /data/extensions.sql
 
 # Restore
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE \
