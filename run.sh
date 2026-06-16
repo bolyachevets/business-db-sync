@@ -5,7 +5,7 @@ SCHEMA=${DATABASE_SCHEMA:-public}
 export PGPASSWORD=""
 
 # Dump from Cloud SQL (proxy handles WIF authentication)
-pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --format=p --file=/data/backup.sql
+pg_dump -U $PGUSER -h localhost -p 6003 $PGDATABASE -n $SCHEMA --no-owner --no-privileges --format=p --file=/data/backup.sql
 
 if [ $? -ne 0 ]; then
   echo "ERROR: pg_dump failed"
@@ -31,7 +31,7 @@ END
     AND rolname NOT LIKE 'iam\\_%' ESCAPE '\\'
     AND rolname NOT LIKE 'rds%'
     AND rolname NOT LIKE 'cloudsql%'
-" | grep -v "^DO \$\$" > /data/roles.sql
+" > /data/roles.sql
 
 # Local PostgreSQL operations (using password auth for local DB)
 while
