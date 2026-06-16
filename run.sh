@@ -22,8 +22,10 @@ psql -U $PGUSER -h localhost -p 6003 -d $PGDATABASE --tuples-only --no-align -c 
   WHERE n.nspname = '$SCHEMA'
 " > /data/extensions.sql
 
-# Remove backslash commands
+# Remove backslash commands and transaction blocks
 sed -i '/^\\/d' /data/backup.sql
+sed -i '/^BEGIN;/d' /data/backup.sql
+sed -i '/^COMMIT;/d' /data/backup.sql
 
 # Kill connections
 while
@@ -43,12 +45,12 @@ psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "CREATE SCHEMA IF 
 # Create extensions (if any)
 [ -s /data/extensions.sql ] && psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -f /data/extensions.sql
 
-# Restore
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE \
-  -v ON_ERROR_STOP=0 \
-  -c "SET session_replication_role = 'replica';" \
-  -f /data/backup.sql \
-  -c "SET session_replication_role = 'origin';"
+# Restore with session_replication_role
+{
+  echo "SET session_replication_role = 'replica';"
+  cat /data/backup.sql
+  echo "SET session_replication_role = 'origin';"
+} | psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -v ON_ERROR_STOP=0
 
 # Setup readonly user (optional)
 psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "ALTER USER readonly WITH LOGIN PASSWORD '${READONLY_PASSWORD}';" 2>/dev/null || true
