@@ -22,8 +22,8 @@ psql -U $PGUSER -h localhost -p 6003 -d $PGDATABASE --tuples-only --no-align -c 
   WHERE n.nspname = '$SCHEMA'
 " > /data/extensions.sql
 
-# Remove backslash commands and transaction blocks
-sed -i '/^\\/d' /data/backup.sql
+# Remove backslash metacommands (but keep \. COPY terminators) and transaction blocks
+sed -i '/^\\[^.]/ d' /data/backup.sql
 sed -i '/^BEGIN;/d' /data/backup.sql
 sed -i '/^COMMIT;/d' /data/backup.sql
 
