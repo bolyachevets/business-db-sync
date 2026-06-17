@@ -172,6 +172,16 @@ objects:
                   secretKeyRef:
                     name: ${APP_NAME}-secret
                     key: readonly-password
+              - name: POSTGRESQL_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: ${APP_NAME}-secret
+                    key: database-user
+              - name: POSTGRESQL_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: ${APP_NAME}-secret
+                    key: database-password
               - name: PGDATABASE
                 valueFrom:
                   secretKeyRef:

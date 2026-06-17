@@ -52,10 +52,19 @@ psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "CREATE SCHEMA IF 
   echo "SET session_replication_role = 'origin';"
 } | psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -v ON_ERROR_STOP=0
 
-# Setup readonly user (optional)
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "ALTER USER readonly WITH LOGIN PASSWORD '${READONLY_PASSWORD}';" 2>/dev/null || true
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT USAGE ON SCHEMA $SCHEMA TO readonly;" 2>/dev/null || true
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT SELECT ON ALL TABLES IN SCHEMA $SCHEMA TO readonly;" 2>/dev/null || true
-psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "ALTER DEFAULT PRIVILEGES IN SCHEMA $SCHEMA GRANT SELECT ON TABLES TO readonly;" 2>/dev/null || true
+# Setup user permissions
+if [ -n "$READONLY_PASSWORD" ]; then
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "ALTER USER readonly WITH LOGIN PASSWORD '${READONLY_PASSWORD}';" 2>/dev/null || true
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT USAGE ON SCHEMA $SCHEMA TO readonly;" 2>/dev/null || true
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT SELECT ON ALL TABLES IN SCHEMA $SCHEMA TO readonly;" 2>/dev/null || true
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "ALTER DEFAULT PRIVILEGES IN SCHEMA $SCHEMA GRANT SELECT ON TABLES TO readonly;" 2>/dev/null || true
+fi
+
+if [ -n "$POSTGRESQL_USER" ] && [ -n "$POSTGRESQL_PASSWORD" ]; then
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -c "ALTER USER \"$POSTGRESQL_USER\" WITH LOGIN PASSWORD '${POSTGRESQL_PASSWORD}';" 2>/dev/null || true
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT USAGE ON SCHEMA $SCHEMA TO \"$POSTGRESQL_USER\";" 2>/dev/null || true
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "GRANT SELECT ON ALL TABLES IN SCHEMA $SCHEMA TO \"$POSTGRESQL_USER\";" 2>/dev/null || true
+  psql -U $REPLICA_ADMIN -h localhost -p 5432 -d $PGDATABASE -c "ALTER DEFAULT PRIVILEGES IN SCHEMA $SCHEMA GRANT SELECT ON TABLES TO \"$POSTGRESQL_USER\";" 2>/dev/null || true
+fi
 
 echo "Restore completed successfully"
